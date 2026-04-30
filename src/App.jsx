@@ -1,4 +1,3 @@
-import { findLocalDfPlaces } from './services/semobStops';
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -8,14 +7,15 @@ import {
 } from 'lucide-react';
 import axios from 'axios';
 import RouteResultRefatorado from './components/RouteResultRefatorado';
+import SimpleMap from './components/SimpleMap';
+import { findLocalDfPlaces, getSEMOBStops, getRoutesByStop } from './services/semobStops';
 
 // ─── API CONFIG ────────────────────────────────
 const TOMTOM_API_KEY = 'kVt12B5jgJTHfcvXLLDSPgcX6bz4f7R1';
 const SEMOB_API_BASE = 'https://otp.mobilibus.com/FY7J-lwk85QGbn/otp/routers/default';
 const API_URL = 'https://teste-6eye.onrender.com/api';
 
-
-// Normaliza códigos para comparar SEMOB x GPS (ex: "Linha 143.2", "143.2", "0.143")
+// Normaliza códigos para comparar SEMOB x GPS
 const normalizeLineCode = (value) => String(value || '')
   .toLowerCase()
   .replace('linha', '')
@@ -117,9 +117,18 @@ const useRouteSearch = () => {
   const getSEMOBRoute = async (origin, destination, signal, mode = 'bus') => {
     try {
       const response = await axios.get(`${SEMOB_API_BASE}/plan`, {
-        params: { fromPlace: `${origin.lat},${origin.lon}`, toPlace: `${destination.lat},${destination.lon}`,
-          mode: mode === 'walk' ? 'WALK' : 'TRANSIT,WALK', locale: 'pt_BR', numItineraries: 3, walkSpeed: 1.4, wheelchair: false, showIntermediateStops: true },
-        timeout: 60000, signal
+        params: { 
+          fromPlace: `${origin.lat},${origin.lon}`, 
+          toPlace: `${destination.lat},${destination.lon}`,
+          mode: mode === 'walk' ? 'WALK' : 'TRANSIT,WALK', 
+          locale: 'pt_BR', 
+          numItineraries: 3, 
+          walkSpeed: 1.4, 
+          wheelchair: false, 
+          showIntermediateStops: true 
+        },
+        timeout: 60000, 
+        signal
       });
       return response.data?.plan?.itineraries || [];
     } catch { return []; }
@@ -133,7 +142,11 @@ const useRouteSearch = () => {
 
   const getNearbyBuses = async (coords, signal) => {
     try {
-      const r = await axios.get(`${SEMOB_API_BASE}/index/stops`, { params: { lat: coords.lat, lon: coords.lon, radius: 1000 }, timeout: 10000, signal });
+      const r = await axios.get(`${SEMOB_API_BASE}/index/stops`, { 
+        params: { lat: coords.lat, lon: coords.lon, radius: 1000 }, 
+        timeout: 10000, 
+        signal 
+      });
       if (Array.isArray(r.data)) return r.data.filter(s => calcDist(coords, s) < 1).slice(0, 5)
         .map(s => ({ stopId: s.id, stopName: s.name, lat: s.lat, lon: s.lon, distanceKm: calcDist(coords, s) }));
     } catch {}
@@ -153,15 +166,21 @@ const useRouteSearch = () => {
         const routeId = leg.route || leg.routeId || leg.trip?.routeId || 'N/A';
         const shortName = leg.routeShortName || leg.trip?.routeShortName || routeId;
         out.push({
-          id: `${routeId}_${idx}_${li}`, line: shortName, routeId,
-          destination, origin,
-          time: Math.ceil(leg.duration / 60 || totalDur), estimatedTime: totalDur,
+          id: `${routeId}_${idx}_${li}`, 
+          line: shortName, 
+          routeId,
+          destination, 
+          origin,
+          time: Math.ceil(leg.duration / 60 || totalDur), 
+          estimatedTime: totalDur,
           stops: leg.intermediateStops?.length || Math.floor(Math.random() * 15) + 3,
           distance: (leg.distance / 1000).toFixed(1),
           walkMinutes: Math.ceil(walkTime),
           fromStop: leg.from?.name || 'Ponto de embarque',
           toStop: leg.to?.name || 'Ponto de desembarque',
           mode: leg.mode,
+          company: leg.routeShortName || leg.agencyName || '',
+          agency: leg.agencyId || '',
           instruction: `Pegue a linha ${shortName} no ponto ${leg.from?.name || 'próximo'}`,
           tripId: leg.trip?.id
         });
@@ -176,7 +195,8 @@ const useRouteSearch = () => {
     abortControllerRef.current = new AbortController();
     const { signal } = abortControllerRef.current;
     isSearchingRef.current = true;
-    setLoading(true); setError(null);
+    setLoading(true); 
+    setError(null);
     try {
       const [originCoords, destCoords] = await Promise.all([
         geocodeAddress(originAddress, signal),
@@ -191,14 +211,22 @@ const useRouteSearch = () => {
         const rv = realtimeData.find(v => sameLine(v.line, r.line) || sameLine(v.routeId, r.routeId));
         if (rv) {
           const etaMin = getEtaMinutes(rv.eta);
-          return { ...r, time: etaMin ?? r.time, realTimeGPS: { lat: rv.lat, lon: rv.lon, bearing: rv.bearing, speed: rv.speed, eta: rv.eta }, isLive: true };
+          return { 
+            ...r, 
+            time: etaMin ?? r.time, 
+            realTimeGPS: { lat: rv.lat, lon: rv.lon, bearing: rv.bearing, speed: rv.speed, eta: rv.eta }, 
+            isLive: true,
+            company: rv.company || r.company || '',
+            agency: rv.agency || r.agency || ''
+          };
         }
         return { ...r, isLive: false };
       }));
     } catch (err) {
       if (!axios.isCancel(err) && err.name !== 'AbortError') setError(err.message || 'Erro ao buscar rotas');
     } finally {
-      setLoading(false); isSearchingRef.current = false;
+      setLoading(false); 
+      isSearchingRef.current = false;
     }
   };
 
@@ -210,7 +238,14 @@ const useRouteSearch = () => {
           const rv = nv.find(v => sameLine(v.line, r.line) || sameLine(v.routeId, r.routeId));
           if (rv) {
             const etaMin = getEtaMinutes(rv.eta);
-            return { ...r, time: etaMin ?? r.time, realTimeGPS: { lat: rv.lat, lon: rv.lon, bearing: rv.bearing, speed: rv.speed, eta: rv.eta }, isLive: true };
+            return { 
+              ...r, 
+              time: etaMin ?? r.time, 
+              realTimeGPS: { lat: rv.lat, lon: rv.lon, bearing: rv.bearing, speed: rv.speed, eta: rv.eta }, 
+              isLive: true,
+              company: rv.company || r.company || '',
+              agency: rv.agency || r.agency || ''
+            };
           }
           return { ...r, isLive: false };
         }));
@@ -225,7 +260,7 @@ const useRouteSearch = () => {
 };
 
 // ─── LOCATION INPUT ──────────────────────────────
-const LocationInput = ({ value, onChange, placeholder, icon: Icon, onDetectLocation, detectingLocation }) => {
+const LocationInput = ({ value, onChange, onPlaceSelect, placeholder, icon: Icon, onDetectLocation, detectingLocation }) => {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [sugLoading, setSugLoading] = useState(false);
@@ -233,55 +268,130 @@ const LocationInput = ({ value, onChange, placeholder, icon: Icon, onDetectLocat
   const debRef = useRef(null);
   const abortRef = useRef(null);
 
-// Adicionar na função fetchSuggestions do LocationInput em App.jsx
-const fetchSuggestions = async (q) => {
-  const safe = sanitizeInput(q);
-  if (!safe || safe.length < 3) { setSuggestions([]); return; }
-  
-  abortRef.current?.abort();
-  abortRef.current = new AbortController();
-  setSugLoading(true);
-  
-  try {
-    const r = await axios.get(
-      `https://api.tomtom.com/search/2/search/${encodeURIComponent(safe)}.json`,
-      { 
-       params: {
-  key: TOMTOM_API_KEY,
-  idxSet: 'POI,PAD,STR',
-  countrySet: 'BR',
-  lat: -15.7934,
-  lon: -47.8823,
-  radius: 50000,
-  limit: 8,
-  language: 'pt-BR'
-},
-        signal: abortRef.current.signal 
-      }
-    );
+  const fetchSuggestions = async (q) => {
+    const safe = sanitizeInput(q);
+    if (!safe || safe.length < 3) { setSuggestions([]); return; }
     
-    if (r.data.results) { 
-      setSuggestions(r.data.results); 
-      setShowSuggestions(true); 
-    }
-  } catch (e) { 
-    if (!axios.isCancel(e)) {
-      console.error('Erro na busca TomTom:', e);
-      // Tratar erro de localização negada
-      if (e.response?.status === 403) {
-        setError('Serviço de localização temporariamente indisponível');
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    setSugLoading(true);
+    
+    try {
+      // 1. Locais fixos do DF
+      const localPlaces = findLocalDfPlaces(safe).map(place => ({
+        ...place,
+        displayName: place.name,
+        position: place.position,
+        type: 'terminal',
+        source: 'DF'
+      }));
+      
+      // 2. Paradas SEMOB
+      let semobStops = [];
+      try {
+        const allStops = await getSEMOBStops();
+        semobStops = allStops
+          .filter(stop => 
+            stop.name.toLowerCase().includes(safe.toLowerCase()) ||
+            (stop.code && stop.code.toString().includes(safe))
+          )
+          .slice(0, 5)
+          .map(stop => ({
+            ...stop,
+            displayName: `${stop.name} ${stop.code ? '• ' + stop.code : ''}`,
+            position: { lat: stop.lat, lon: stop.lon },
+            type: 'parada_semob',
+            source: 'SEMOB',
+            stopId: stop.id
+          }));
+      } catch (e) {
+        console.log('SEMOB indisponível, continuando...');
       }
+      
+      // 3. TomTom
+      let tomtomResults = [];
+      try {
+        const r = await axios.get(
+          `https://api.tomtom.com/search/2/search/${encodeURIComponent(safe)}.json`,
+          { 
+            params: {
+              key: TOMTOM_API_KEY,
+              idxSet: 'POI,PAD,STR',
+              countrySet: 'BR',
+              lat: -15.7934,
+              lon: -47.8823,
+              radius: 50000,
+              limit: 5,
+              language: 'pt-BR'
+            },
+            signal: abortRef.current.signal 
+          }
+        );
+        
+        if (r.data?.results) {
+          tomtomResults = r.data.results
+            .filter(result => {
+              const name = (result.address?.freeformAddress || '').toLowerCase();
+              return !localPlaces.some(p => 
+                p.name.toLowerCase().includes(name) || 
+                name.includes(p.name.toLowerCase())
+              );
+            })
+            .map(result => ({
+              displayName: result.address.freeformAddress,
+              position: result.position,
+              type: 'endereco',
+              source: 'TomTom',
+              address: result.address
+            }));
+        }
+      } catch (e) {
+        if (!axios.isCancel(e)) {
+          console.log('TomTom indisponível');
+        }
+      }
+      
+      const allSuggestions = [...localPlaces, ...semobStops, ...tomtomResults];
+      setSuggestions(allSuggestions);
+      setShowSuggestions(true);
+      
+    } catch (e) { 
+      if (!axios.isCancel(e)) {
+        console.error('Erro na busca:', e);
+        const fallbackPlaces = findLocalDfPlaces(safe);
+        if (fallbackPlaces.length > 0) {
+          setSuggestions(fallbackPlaces.map(p => ({
+            ...p,
+            displayName: p.name,
+            position: p.position
+          })));
+          setShowSuggestions(true);
+        }
+      }
+    } finally { 
+      setSugLoading(false); 
     }
-  } finally { 
-    setSugLoading(false); 
-  }
-};
+  };
 
   const handleChange = (e) => {
     const safe = sanitizeInput(e.target.value);
     onChange(safe);
     clearTimeout(debRef.current);
     debRef.current = setTimeout(() => fetchSuggestions(safe), 500);
+  };
+
+  const handleSuggestionClick = (suggestion) => {
+    onChange(suggestion.displayName || suggestion.name);
+    if (onPlaceSelect) {
+      onPlaceSelect({
+        name: suggestion.displayName || suggestion.name,
+        position: suggestion.position,
+        type: suggestion.type || 'local',
+        stopId: suggestion.stopId
+      });
+    }
+    setShowSuggestions(false);
+    setSuggestions([]);
   };
 
   useEffect(() => {
@@ -319,92 +429,16 @@ const fetchSuggestions = async (q) => {
             exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.14 }}
             className="absolute z-20 w-full mt-1.5 bg-[var(--dropdown-bg)] backdrop-blur-xl rounded-xl shadow-xl border border-[var(--border)] max-h-56 overflow-y-auto">
             {suggestions.map((s, i) => (
-              <button key={i} onClick={() => { onChange(s.address.freeformAddress); setShowSuggestions(false); setSuggestions([]); }}
+              <button key={i} onClick={() => handleSuggestionClick(s)}
                 className="w-full text-left px-4 py-2.5 hover:bg-[var(--accent)]/8 transition-colors border-b border-[var(--border)] last:border-0">
-                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{s.address.freeformAddress}</p>
-                <p className="text-xs text-[var(--text-tertiary)] truncate">{s.address.municipality || s.address.countrySubdivision}</p>
+                <p className="text-sm font-medium text-[var(--text-primary)] truncate">{s.displayName || s.name}</p>
+                <p className="text-xs text-[var(--text-tertiary)] truncate">{s.source || s.type}</p>
               </button>
             ))}
           </motion.div>
         )}
       </AnimatePresence>
     </div>
-  );
-};
-
-// ─── ROUTE RESULT ────────────────────────────────
-const RouteResult = ({ routes, origin, destination, loading }) => {
-  if (loading) return (
-    <div className="mt-6 space-y-3">
-      {[1,2,3].map(i => <div key={i} className="h-24 rounded-2xl animate-pulse bg-[var(--skeleton-bg)]" />)}
-    </div>
-  );
-  if (!routes?.length) return null;
-  return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="mt-7 space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold text-[var(--text-tertiary)] uppercase tracking-widest mb-1">Rotas SEMOB / DFTrans</p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-sm font-semibold text-[var(--text-primary)] truncate max-w-[140px]">{origin}</p>
-            <ArrowRight className="h-3 w-3 text-[var(--text-tertiary)] flex-shrink-0" />
-            <p className="text-sm font-semibold text-[var(--text-primary)] truncate max-w-[140px]">{destination}</p>
-          </div>
-        </div>
-        <span className="text-xs font-medium text-[var(--text-tertiary)] flex-shrink-0 mt-1">{routes.length} {routes.length === 1 ? 'opção' : 'opções'}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-        <span className="text-[10px] font-semibold text-green-600 dark:text-green-400">
-          {routes.some(r => r.isLive) ? '🚀 GPS REAL — Veículos ao vivo' : 'Dados de horários — SEMOB/DFTrans'}
-        </span>
-      </div>
-      <div className="space-y-2.5">
-        {routes.map((route, idx) => (
-          <motion.div key={route.id}
-            initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: idx * 0.06, ...spring }}
-            whileHover={{ y: -2 }} whileTap={{ scale: 0.99 }}
-            className={`rounded-2xl border p-4 cursor-pointer transition-all duration-200 ${
-              route.isLive ? 'border-green-300/60 bg-green-50/40 dark:border-green-800/50 dark:bg-green-900/10'
-                : 'border-[var(--border)] bg-[var(--card-inner)]'
-            }`}>
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={`rounded-full p-2 flex-shrink-0 ${route.isLive ? 'bg-green-100 dark:bg-green-900/40' : 'bg-[var(--accent)]/10'}`}>
-                  {route.mode === 'BUS' || route.mode === 'TRAM'
-                    ? <Bus className={`h-4 w-4 ${route.isLive ? 'text-green-600' : 'text-[var(--accent)]'}`} strokeWidth={1.5} />
-                    : <Train className={`h-4 w-4 ${route.isLive ? 'text-green-600' : 'text-[var(--accent)]'}`} strokeWidth={1.5} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                    <span className="font-semibold text-sm text-[var(--text-primary)] tracking-tight">Linha {route.line}</span>
-                    {route.isLive && <span className="text-[9px] font-bold text-green-700 dark:text-green-400 bg-green-100 dark:bg-green-900/40 px-1.5 py-0.5 rounded-full tracking-wide">AO VIVO</span>}
-                    {route.mode && <span className="text-[10px] text-[var(--text-tertiary)]">{route.mode}</span>}
-                  </div>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div className="flex items-center gap-1"><Clock className="h-3 w-3 text-[var(--text-tertiary)]" strokeWidth={1.5} /><span className="text-xs font-semibold text-[var(--accent)]">{route.time} min</span></div>
-                    <div className="flex items-center gap-1"><MapPin className="h-3 w-3 text-[var(--text-tertiary)]" strokeWidth={1.5} /><span className="text-xs text-[var(--text-secondary)]">{route.stops} paradas</span></div>
-                    {route.walkMinutes > 0 && <div className="flex items-center gap-1"><Footprints className="h-3 w-3 text-[var(--text-tertiary)]" strokeWidth={1.5} /><span className="text-xs text-[var(--text-secondary)]">{route.walkMinutes} min a pé</span></div>}
-                    {route.realTimeGPS?.eta && (
-                      <div className="flex items-center gap-1 bg-green-100 dark:bg-green-900/40 px-1.5 py-0.5 rounded-full">
-                        <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
-                        <span className="text-[9px] font-bold text-green-700 dark:text-green-400">{Math.round((new Date(route.realTimeGPS.eta) - new Date()) / 60000)} min</span>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-[var(--text-tertiary)] mt-1 truncate">Embarque: {route.fromStop}</p>
-                </div>
-              </div>
-              <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
-                className={`rounded-full px-4 py-1.5 text-xs font-semibold text-white flex-shrink-0 self-start sm:self-center transition-opacity hover:opacity-90 ${route.isLive ? 'bg-green-600' : 'bg-[var(--accent)]'}`}>
-                {route.isLive ? 'Ver no mapa' : 'Detalhes'}
-              </motion.button>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-    </motion.div>
   );
 };
 
@@ -425,6 +459,10 @@ function App() {
   const [activeSlide, setActiveSlide] = useState(0);
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
+  const [originPlace, setOriginPlace] = useState(null);
+  const [destinationPlace, setDestinationPlace] = useState(null);
+  const [resolvedOriginCoords, setResolvedOriginCoords] = useState(null);
+  const [resolvedDestinationCoords, setResolvedDestinationCoords] = useState(null);
   const [selectedMode, setSelectedMode] = useState('bus');
   const [hasSearched, setHasSearched] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -457,11 +495,46 @@ function App() {
     );
   };
 
+  const geocodeAddress = async (address) => {
+    const safe = sanitizeInput(address);
+    const response = await axios.get(
+      `https://api.tomtom.com/search/2/geocode/${encodeURIComponent(safe)}.json`,
+      { params: { key: TOMTOM_API_KEY, countrySet: 'BR', limit: 1 } }
+    );
+    if (response.data.results?.[0]) {
+      return response.data.results[0].position;
+    }
+    throw new Error('Endereço não encontrado');
+  };
+
   const handleSearch = async () => {
     const safeO = sanitizeInput(origin);
     const safeD = sanitizeInput(destination);
     if (!safeO || !safeD) return;
     setHasSearched(true);
+    
+    // Resolver coordenadas para modo caminhada
+    if (selectedMode === 'walk') {
+      let originCoords = originPlace?.position;
+      let destCoords = destinationPlace?.position;
+      
+      try {
+        if (!originCoords) {
+          const geocoded = await geocodeAddress(safeO);
+          originCoords = { lat: geocoded.lat, lon: geocoded.lon };
+        }
+        if (!destCoords) {
+          const geocoded = await geocodeAddress(safeD);
+          destCoords = { lat: geocoded.lat, lon: geocoded.lon };
+        }
+        
+        setResolvedOriginCoords(originCoords);
+        setResolvedDestinationCoords(destCoords);
+      } catch (err) {
+        console.error('Erro ao resolver coordenadas:', err);
+      }
+    }
+    
     await searchRoute(safeO, safeD, selectedMode);
   };
 
@@ -518,10 +591,24 @@ function App() {
 
           <div className="p-6 md:p-8">
             <div className="space-y-3">
-              <LocationInput value={origin} onChange={setOrigin} placeholder="Ponto de partida" icon={MapPin}
-                onDetectLocation={() => detectLocation(setOrigin)} detectingLocation={locationLoading} />
-              <LocationInput value={destination} onChange={setDestination} placeholder="Para onde você vai?" icon={Search}
-                onDetectLocation={() => detectLocation(setDestination)} detectingLocation={locationLoading} />
+              <LocationInput 
+                value={origin} 
+                onChange={setOrigin} 
+                onPlaceSelect={setOriginPlace}
+                placeholder="Ponto de partida" 
+                icon={MapPin}
+                onDetectLocation={() => detectLocation(setOrigin)} 
+                detectingLocation={locationLoading} 
+              />
+              <LocationInput 
+                value={destination} 
+                onChange={setDestination} 
+                onPlaceSelect={setDestinationPlace}
+                placeholder="Para onde você vai?" 
+                icon={Search}
+                onDetectLocation={() => detectLocation(setDestination)} 
+                detectingLocation={locationLoading} 
+              />
             </div>
 
             <div className="mt-6">
@@ -554,7 +641,25 @@ function App() {
               {loading ? <><Loader2 className="h-4 w-4 animate-spin" />Buscando com GPS REAL…</> : 'Buscar rota agora'}
             </motion.button>
 
-            {(hasSearched || routes.length > 0) && <RouteResultRefatorado routes={routes} origin={origin} destination={destination} loading={loading} />}
+            {/* Mapa simples para modo caminhada */}
+                        {/* Mapa simples para modo caminhada */}
+            {selectedMode === 'walk' && resolvedOriginCoords && resolvedDestinationCoords && (
+              <SimpleMap
+                origin={resolvedOriginCoords}
+                destination={resolvedDestinationCoords}
+                originName={origin}
+                destinationName={destination}
+              />
+            )}
+
+            {(hasSearched || routes.length > 0) && (
+              <RouteResultRefatorado 
+                routes={routes} 
+                origin={origin} 
+                destination={destination} 
+                loading={loading} 
+              />
+            )}
 
             {error && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}

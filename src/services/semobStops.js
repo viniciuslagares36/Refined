@@ -1,72 +1,78 @@
+// src/services/semobStops.js
 import axios from 'axios';
-import { DF_FAVORITE_PLACES } from '../data/dfPlaces';
+import { DF_FAVORITE_PLACES, calcularDistancia } from '../config/busConfig';
 
-const SEMOB_STOPS_URL =
-  'https://otp.mobilibus.com/FY7J-lwk85QGbn/otp/routers/default/index/stops';
+const SEMOB_STOPS_URL = 'https://otp.mobilibus.com/FY7J-lwk85QGbn/otp/routers/default/index/stops';
+let stopsCache = null;
+let cacheTimestamp = 0;
+const CACHE_DURATION = 3600000;
 
-export const normalizeText = (text) =>
-  String(text || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-
-export const getAllSemobStops = async () => {
-  const cacheKey = 'localizabus_semob_stops_v1';
+export const getSEMOBStops = async () => {
+  const now = Date.now();
+  if (stopsCache && now - cacheTimestamp < CACHE_DURATION) {
+    return stopsCache;
+  }
 
   try {
-    const cached = localStorage.getItem(cacheKey);
-
-    if (cached) {
-      return JSON.parse(cached);
-    }
-
     const response = await axios.get(SEMOB_STOPS_URL, {
-      timeout: 20000
+      params: {
+        lat: -15.7934,
+        lon: -47.8823,
+        radius: 50000
+      },
+      timeout: 10000
     });
 
-    const stops = Array.isArray(response.data)
-      ? response.data.map((stop) => ({
-          name: stop.name,
-          address: `${stop.name}, Brasília - DF`,
-          position: {
-            lat: stop.lat,
-            lon: stop.lon
-          },
-          type: 'Parada',
-          stopId: stop.id
-        }))
-      : [];
-
-    localStorage.setItem(cacheKey, JSON.stringify(stops));
-
-    return stops;
+    if (Array.isArray(response.data)) {
+      stopsCache = response.data.map(stop => ({
+        id: stop.id,
+        name: stop.name,
+        lat: stop.lat,
+        lon: stop.lon,
+        code: stop.code || stop.id,
+        type: 'Parada SEMOB'
+      }));
+      cacheTimestamp = now;
+      return stopsCache;
+    }
+    return [];
   } catch (error) {
     console.error('Erro ao buscar paradas SEMOB:', error);
+    return stopsCache || [];
+  }
+};
+
+export const getRoutesByStop = async (stopId) => {
+  try {
+    const response = await axios.get(
+      `https://otp.mobilibus.com/FY7J-lwk85QGbn/otp/routers/default/index/stops/${stopId}/routes`,
+      { timeout: 10000 }
+    );
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) {
+    console.error('Erro ao buscar rotas da parada:', error);
     return [];
   }
 };
 
-export const findLocalDfPlaces = async (query) => {
-  const safeQuery = normalizeText(query);
-
-  if (!safeQuery || safeQuery.length < 2) {
-    return [];
-  }
-
-  const favoriteResults = DF_FAVORITE_PLACES.filter((place) => {
-    const haystack = normalizeText(`${place.name} ${place.address} ${place.type}`);
-    return haystack.includes(safeQuery);
-  });
-
-  const allStops = await getAllSemobStops();
-
-  const stopResults = allStops
-    .filter((stop) => {
-      const haystack = normalizeText(`${stop.name} ${stop.address}`);
-      return haystack.includes(safeQuery);
+export const findNearbyStops = (stops, lat, lon, maxDistance = 5) => {
+  if (!stops?.length || !lat || !lon) return [];
+  
+  return stops
+    .map(stop => {
+      const distance = calcularDistancia(lat, lon, stop.lat, stop.lon);
+      return { ...stop, distance };
     })
-    .slice(0, 8);
+    .filter(stop => stop.distance <= maxDistance)
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 10);
+};
 
-  return [...favoriteResults, ...stopResults].slice(0, 10);
+export const findLocalDfPlaces = (query) => {
+  if (!query || query.length < 2) return [];
+  const safe = query.toLowerCase();
+  return DF_FAVORITE_PLACES.filter(place => 
+    place.name.toLowerCase().includes(safe) || 
+    place.address.toLowerCase().includes(safe)
+  );
 };

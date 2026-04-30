@@ -1,245 +1,212 @@
-// src/components/RouteResultRefatorado.jsx
-import React, { useMemo, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bus, Train, Clock, MapPin, Footprints, ArrowRight } from 'lucide-react';
-import BadgeTempo from './BadgeTempo';
-import { calcularDistancia, calcularTempoCaminhada, BACIA_CORES } from '../config/busConfig';
+// src/config/busConfig.js
+// Configuração completa do sistema LocalizaBus
 
-const spring = { type: 'spring', stiffness: 120, damping: 22 };
-
-// Identificar bacia pelo código da linha
-const identificarBacia = (codigoLinha, modo) => {
-  if (String(modo || '').toUpperCase().includes('RAIL') || String(modo || '').toLowerCase().includes('metro')) {
-    return Object.values(BACIA_CORES).find(
-      bacia => bacia.tipo === 'metro' && bacia.codigosLinha.includes(codigoLinha)
-    );
+// ========== MAPEAMENTO DE BACIAS DO DF ==========
+export const BACIA_CORES = {
+  PIRACICABANA: {
+    cor: '#16a34a', // Verde
+    nome: 'Piracicabana',
+    nomeExibicao: 'Piracicabana',
+    corTexto: 'text-green-700 dark:text-green-400',
+    corBg: 'bg-green-100 dark:bg-green-900/30',
+    corBorda: 'border-green-200 dark:border-green-800',
+    corIcone: 'text-green-600',
+    padroesEmpresa: ['piracicabana', 'viação piracicabana', 'piracicabana df', 'pirac'],
+    tipo: 'onibus'
+  },
+  MARECHAL: {
+    cor: '#ea580c', // Laranja
+    nome: 'Marechal',
+    nomeExibicao: 'Marechal',
+    corTexto: 'text-orange-700 dark:text-orange-400',
+    corBg: 'bg-orange-100 dark:bg-orange-900/30',
+    corBorda: 'border-orange-200 dark:border-orange-800',
+    corIcone: 'text-orange-600',
+    padroesEmpresa: ['marechal', 'viação marechal', 'marechal df', 'marech'],
+    tipo: 'onibus'
+  },
+  PIONEIRA: {
+    cor: '#2563eb', // Azul
+    nome: 'Pioneira',
+    nomeExibicao: 'Pioneira',
+    corTexto: 'text-blue-700 dark:text-blue-400',
+    corBg: 'bg-blue-100 dark:bg-blue-900/30',
+    corBorda: 'border-blue-200 dark:border-blue-800',
+    corIcone: 'text-blue-600',
+    padroesEmpresa: ['pioneira', 'viação pioneira', 'pioneira df', 'pion'],
+    tipo: 'onibus'
+  },
+  URBI: {
+    cor: '#7c3aed', // Violeta
+    nome: 'Urbi',
+    nomeExibicao: 'Urbi',
+    corTexto: 'text-violet-700 dark:text-violet-400',
+    corBg: 'bg-violet-100 dark:bg-violet-900/30',
+    corBorda: 'border-violet-200 dark:border-violet-800',
+    corIcone: 'text-violet-600',
+    padroesEmpresa: ['urbi', 'viação urbi', 'urbi df'],
+    tipo: 'onibus'
+  },
+  SAO_JOSE: {
+    cor: '#dc2626', // Vermelho
+    nome: 'São José',
+    nomeExibicao: 'São José',
+    corTexto: 'text-red-700 dark:text-red-400',
+    corBg: 'bg-red-100 dark:bg-red-900/30',
+    corBorda: 'border-red-200 dark:border-red-800',
+    corIcone: 'text-red-600',
+    padroesEmpresa: ['são josé', 'sao jose', 'viação são josé', 'sao jose df'],
+    tipo: 'onibus'
+  },
+  METRO_GREEN: {
+    cor: '#16a34a',
+    nome: 'Metrô Verde',
+    nomeExibicao: 'Metrô Verde',
+    corTexto: 'text-green-700 dark:text-green-400',
+    corBg: 'bg-green-100 dark:bg-green-900/30',
+    corBorda: 'border-green-200 dark:border-green-800',
+    corIcone: 'text-green-600',
+    padroesEmpresa: ['metrô verde', 'metro verde'],
+    tipo: 'metro'
+  },
+  METRO_ORANGE: {
+    cor: '#ea580c',
+    nome: 'Metrô Laranja',
+    nomeExibicao: 'Metrô Laranja',
+    corTexto: 'text-orange-700 dark:text-orange-400',
+    corBg: 'bg-orange-100 dark:bg-orange-900/30',
+    corBorda: 'border-orange-200 dark:border-orange-800',
+    corIcone: 'text-orange-600',
+    padroesEmpresa: ['metrô laranja', 'metro laranja'],
+    tipo: 'metro'
   }
-  return Object.values(BACIA_CORES).find(
-    bacia => bacia.tipo === 'onibus' && bacia.codigosLinha.some(codigo => String(codigoLinha || '').includes(codigo))
-  );
 };
 
-const RouteResultRefatorado = ({ routes, origin, destination, loading, userLocation }) => {
-  // Memoizar rotas processadas com dados de caminhada
-  const processedRoutes = useMemo(() => {
-    if (!routes?.length) return [];
-    
-    return routes.map(route => {
-      const bacia = identificarBacia(route.line, route.mode) || { cor: route.isLive ? '#22c55e' : '#0a84ff', nome: route.mode === 'BUS' ? 'Ônibus' : (route.mode || 'Rota'), tipo: route.mode === 'BUS' ? 'onibus' : 'metro' };
-      
-      // Calcular distância e tempo de caminhada se tiver localização do usuário
-      let caminhadaInfo = null;
-      if (userLocation && route.fromStop) {
-        const distancia = calcularDistancia(
-          userLocation.lat, 
-          userLocation.lon,
-          route.lat || -15.7934, // fallback para centro de Brasília
-          route.lon || -47.8823
-        );
-        const tempoCaminhada = calcularTempoCaminhada(distancia);
-        
-        caminhadaInfo = {
-          distancia: distancia.toFixed(1),
-          tempo: Math.ceil(tempoCaminhada)
-        };
-      }
-      
-      return {
-        ...route,
-        bacia,
-        caminhadaInfo,
-        // Determinar estado do badge
-        badgeEstado: {
-          gps_active: route.isLive || false,
-          time: route.time || 0,
-          modo: bacia?.tipo || (route.mode === 'BUS' ? 'onibus' : 'metro')
-        }
-      };
-    });
-  }, [routes, userLocation]);
-
-  // Memoizar se há rotas ao vivo
-  const hasLiveRoutes = useMemo(() => 
-    processedRoutes.some(r => r.isLive), [processedRoutes]
-  );
-
-  if (loading) {
-    return (
-      <div className="mt-6 space-y-3">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="h-24 rounded-2xl animate-pulse bg-gray-200 dark:bg-gray-700" />
-        ))}
-      </div>
-    );
-  }
-
-  if (!processedRoutes?.length) return null;
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      transition={spring} 
-      className="mt-7 space-y-4"
-    >
-      {/* Cabeçalho */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-1">
-            Rotas SEMOB / DFTrans
-          </p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate max-w-[140px]">
-              {origin}
-            </p>
-            <ArrowRight className="h-3 w-3 text-gray-400 flex-shrink-0" />
-            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate max-w-[140px]">
-              {destination}
-            </p>
-          </div>
-        </div>
-        <span className="text-xs font-medium text-gray-500 flex-shrink-0 mt-1">
-          {processedRoutes.length} {processedRoutes.length === 1 ? 'opção' : 'opções'}
-        </span>
-      </div>
-
-      {/* Indicador de status GPS */}
-      <div className="flex items-center gap-2">
-        <div className={`h-1.5 w-1.5 rounded-full animate-pulse ${
-          hasLiveRoutes ? 'bg-green-500' : 'bg-gray-400'
-        }`} />
-        <span className={`text-[10px] font-semibold ${
-          hasLiveRoutes 
-            ? 'text-green-600 dark:text-green-400' 
-            : 'text-gray-500 dark:text-gray-400'
-        }`}>
-          {hasLiveRoutes 
-            ? '🚀 GPS REAL — Veículos ao vivo' 
-            : 'Dados de horários — SEMOB/DFTrans'}
-        </span>
-      </div>
-
-      {/* Lista de Rotas */}
-      <div className="space-y-2.5">
-        <AnimatePresence>
-          {processedRoutes.map((route, idx) => (
-            <motion.div
-              key={route.id}
-              initial={{ opacity: 0, x: -16 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -16 }}
-              transition={{ delay: idx * 0.06, ...spring }}
-              whileHover={{ y: -2 }}
-              whileTap={{ scale: 0.99 }}
-              className={`rounded-2xl border p-4 cursor-pointer transition-all duration-200 ${
-                route.isLive 
-                  ? 'border-green-300/60 bg-green-50/40 dark:border-green-800/50 dark:bg-green-900/10 hover:shadow-lg'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:shadow-md'
-              }`}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                {/* Informações da rota */}
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  {/* Ícone da Bacia */}
-                  {route.bacia && (
-                    <div 
-                      className="rounded-full p-2 flex-shrink-0"
-                      style={{ 
-                        backgroundColor: `${route.bacia.cor}15`,
-                        border: `1px solid ${route.bacia.cor}30`
-                      }}
-                    >
-                      {route.bacia.tipo === 'metro' ? (
-                        <Train className="h-4 w-4" style={{ color: route.bacia.cor }} strokeWidth={1.5} />
-                      ) : (
-                        <Bus className="h-4 w-4" style={{ color: route.bacia.cor }} strokeWidth={1.5} />
-                      )}
-                    </div>
-                  )}
-
-                  {/* Detalhes da Linha */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                      {/* Nome da Bacia e Linha */}
-                      {route.bacia && (
-                        <span 
-                          className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                          style={{ 
-                            backgroundColor: `${route.bacia.cor}15`,
-                            color: route.bacia.cor
-                          }}
-                        >
-                          {route.bacia.nome}
-                        </span>
-                      )}
-                      <span className="font-semibold text-sm text-gray-900 dark:text-white tracking-tight">
-                        Linha {route.line}
-                      </span>
-                    </div>
-
-                    {/* Métricas */}
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <div className="flex items-center gap-1">
-                        <Clock className="h-3 w-3 text-gray-400" strokeWidth={1.5} />
-                        <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                          {route.time} min
-                        </span>
-                      </div>
-                      
-                      {route.stops && (
-                        <div className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3 text-gray-400" strokeWidth={1.5} />
-                          <span className="text-xs text-gray-600 dark:text-gray-400">
-                            {route.stops} paradas
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Informações de Caminhada */}
-                      {route.caminhadaInfo && (
-                        <div className="flex items-center gap-1">
-                          <Footprints className="h-3 w-3 text-gray-400" strokeWidth={1.5} />
-                          <span className="text-xs text-gray-600 dark:text-gray-400">
-                            {route.caminhadaInfo.distancia}km • {route.caminhadaInfo.tempo}min
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Ponto de Embarque */}
-                    {route.fromStop && (
-                      <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 truncate">
-                        Embarque: {route.fromStop}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                {/* Badge de Tempo + Botão */}
-                <div className="flex items-center gap-2 self-start sm:self-center">
-                  <BadgeTempo
-                    gps_active={route.badgeEstado.gps_active}
-                    time={route.badgeEstado.time}
-                    modo={route.badgeEstado.modo}
-                  />
-                  
-                  <motion.button
-                    whileHover={{ scale: 1.04 }}
-                    whileTap={{ scale: 0.96 }}
-                    className={`rounded-full px-4 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 ${
-                      route.isLive ? 'bg-green-600' : 'bg-blue-500'
-                    }`}
-                  >
-                    {route.isLive ? 'Ver mapa' : 'Detalhes'}
-                  </motion.button>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-    </motion.div>
-  );
+// ========== ESTADOS DE TEMPO PARA BADGES ==========
+export const TEMPO_ESTADOS = {
+  LIVE: 'live',
+  IMMINENT: 'imminent',
+  SCHEDULED: 'scheduled'
 };
 
-export default React.memo(RouteResultRefatorado);
+export const TEMPO_CONFIG = {
+  LIMIAR_IMINENTE_MIN: 1,
+  CORES: {
+    LIVE: '#22c55e',
+    IMMINENT: '#ef4444',
+    SCHEDULED: '#9ca3af'
+  },
+  TEXTOS: {
+    LIVE: 'Ao Vivo',
+    IMMINENT: 'Agora!',
+    SCHEDULED: 'Programado'
+  }
+};
+
+// ========== CONFIGURAÇÕES TOMTOM ==========
+export const TOMTOM_CONFIG = {
+  API_KEY: 'kVt12B5jgJTHfcvXLLDSPgcX6bz4f7R1',
+  CENTRO_BRASILIA: {
+    lat: -15.7934,
+    lon: -47.8823
+  },
+  SEARCH_PARAMS: {
+    idxSet: 'POI,PAD,STR',
+    countrySet: 'BR',
+    limit: 5,
+    language: 'pt-BR'
+  }
+};
+
+// ========== FUNÇÃO PARA IDENTIFICAR BACIA POR EMPRESA ==========
+export const identificarBaciaPorEmpresa = (companyName, agencyName, lineCode) => {
+  if (!companyName && !agencyName && !lineCode) return null;
+  
+  const textoBusca = `${companyName || ''} ${agencyName || ''} ${lineCode || ''}`.toLowerCase();
+  
+  for (const bacia of Object.values(BACIA_CORES)) {
+    if (bacia.padroesEmpresa?.some(padrao => textoBusca.includes(padrao))) {
+      return bacia;
+    }
+  }
+  
+  if (textoBusca.includes('marechal') || textoBusca.includes('marech')) {
+    return BACIA_CORES.MARECHAL;
+  }
+  if (textoBusca.includes('piracicabana') || textoBusca.includes('pirac')) {
+    return BACIA_CORES.PIRACICABANA;
+  }
+  if (textoBusca.includes('pioneira') || textoBusca.includes('pion')) {
+    return BACIA_CORES.PIONEIRA;
+  }
+  if (textoBusca.includes('urbi')) {
+    return BACIA_CORES.URBI;
+  }
+  if (textoBusca.includes('são josé') || textoBusca.includes('sao jose')) {
+    return BACIA_CORES.SAO_JOSE;
+  }
+  
+  return null;
+};
+
+// ========== FUNÇÕES UTILITÁRIAS ==========
+export const calcularDistancia = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) ** 2 + 
+            Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * 
+            Math.sin(dLon/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+};
+
+export const calcularTempoCaminhada = (distanciaKm) => {
+  const velocidadeMedia = 5;
+  return (distanciaKm / velocidadeMedia) * 60;
+};
+
+// ========== LOCAIS FIXOS DO DF ==========
+export const DF_FAVORITE_PLACES = [
+  {
+    name: 'Rodoviária do Plano Piloto',
+    address: 'Rodoviária do Plano Piloto, Brasília - DF',
+    position: { lat: -15.7939, lon: -47.8828 },
+    type: 'Terminal'
+  },
+  {
+    name: 'Terminal Asa Sul',
+    address: 'Terminal Asa Sul, Brasília - DF',
+    position: { lat: -15.8371, lon: -47.9135 },
+    type: 'Terminal'
+  },
+  {
+    name: 'Terminal Asa Norte',
+    address: 'Terminal Asa Norte, Brasília - DF',
+    position: { lat: -15.7356, lon: -47.8956 },
+    type: 'Terminal'
+  },
+  {
+    name: 'Terminal Ceilândia',
+    address: 'Terminal Ceilândia, Brasília - DF',
+    position: { lat: -15.8162, lon: -48.1068 },
+    type: 'Terminal'
+  },
+  {
+    name: 'Terminal Taguatinga',
+    address: 'Terminal Taguatinga, Brasília - DF',
+    position: { lat: -15.8324, lon: -48.0573 },
+    type: 'Terminal'
+  },
+  {
+    name: 'EPCT 85.3 Sul',
+    address: 'EPCT 85.3 Sul, Brasília - DF',
+    position: { lat: -15.8469, lon: -48.0281 },
+    type: 'Parada'
+  }
+];
+
+// ========== API SEMOB ==========
+export const SEMOB_API = {
+  STOPS: 'https://otp.mobilibus.com/FY7J-lwk85QGbn/otp/routers/default/index/stops',
+  ROUTES: 'https://otp.mobilibus.com/FY7J-lwk85QGbn/otp/routers/default/index/stops'
+};
